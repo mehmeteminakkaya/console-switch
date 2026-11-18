@@ -157,6 +157,9 @@ namespace ConsoleSwitch
         [DllImport("iphlpapi.dll", ExactSpelling = true)]
         public static extern int SendARP(uint destIp, uint srcIp, byte[] macAddr, ref uint physicalAddrLen);
 
+        [DllImport("kernel32.dll")]
+        public static extern ulong GetTickCount64();
+
         // ---------- window ----------
         [DllImport("dwmapi.dll")]
         public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);

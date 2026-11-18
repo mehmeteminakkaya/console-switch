@@ -275,10 +275,11 @@ namespace ConsoleSwitch
                 Mode = Mode.Console;
                 Log.Write("Console already on screen; not touching anything.");
             }
-            else if (online && input == cfg.PcInput)
+            else if (online && input == cfg.PcInput && Native.GetTickCount64() > 10UL * 60 * 1000)
             {
-                // Started (or restarted) while someone is using the PC and the console happens to be on:
-                // don't yank them over. Auto switching resumes the next time the console turns on.
+                // Restarted mid-session (not right after Windows booted) while someone is using the PC and the
+                // console happens to be on: don't yank them over. Right after boot the PC input is only showing
+                // because Windows just started, so the console wins then.
                 Mode = Mode.Pc;
                 Log.Write("Console is on but the PC is on screen; staying on the PC.");
             }

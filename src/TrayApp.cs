@@ -147,6 +147,7 @@ namespace ConsoleSwitch
             icon.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) panel.Toggle(); };
 
             SystemEvents.DisplaySettingsChanged += (s, e) => Ddc.ClearCache();
+            MigrateStartup();
 
             if (!cfg.IsComplete && !RunSetup())
             {
@@ -231,18 +232,44 @@ namespace ConsoleSwitch
             try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true }); } catch { }
         }
 
-        static bool IsStartup()
+        // Start with Windows through a shortcut in the Startup folder. (A Run registry value was skipped by
+        // Explorer on some boots; Startup-folder shortcuts have been reliable.)
+        static string StartupShortcut
         {
-            using (var k = Registry.CurrentUser.OpenSubKey(RunKey)) return k != null && k.GetValue("ConsoleSwitch") != null;
+            get { return System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "Console Switch.lnk"); }
         }
+
+        static bool IsStartup() { return System.IO.File.Exists(StartupShortcut); }
 
         internal static void SetStartup(bool on)
         {
-            using (var k = Registry.CurrentUser.CreateSubKey(RunKey))
+            // Older versions used the Run key; clean it up either way.
+            try { using (var k = Registry.CurrentUser.CreateSubKey(RunKey)) k.DeleteValue("ConsoleSwitch", false); } catch { }
+            try
             {
-                if (on) k.SetValue("ConsoleSwitch", "\"" + Application.ExecutablePath + "\"");
-                else k.DeleteValue("ConsoleSwitch", false);
+                if (!on) { if (System.IO.File.Exists(StartupShortcut)) System.IO.File.Delete(StartupShortcut); return; }
+                var shellType = Type.GetTypeFromProgID("WScript.Shell");
+                object shell = Activator.CreateInstance(shellType);
+                object lnk = shellType.InvokeMember("CreateShortcut", System.Reflection.BindingFlags.InvokeMethod, null, shell, new object[] { StartupShortcut });
+                var t = lnk.GetType();
+                t.InvokeMember("TargetPath", System.Reflection.BindingFlags.SetProperty, null, lnk, new object[] { Application.ExecutablePath });
+                t.InvokeMember("WorkingDirectory", System.Reflection.BindingFlags.SetProperty, null, lnk, new object[] { System.IO.Path.GetDirectoryName(Application.ExecutablePath) });
+                t.InvokeMember("Description", System.Reflection.BindingFlags.SetProperty, null, lnk, new object[] { "Console Switch" });
+                t.InvokeMember("Save", System.Reflection.BindingFlags.InvokeMethod, null, lnk, null);
             }
+            catch (Exception ex) { Log.Write("Could not change start-with-Windows: " + ex.Message); }
+        }
+
+        /// <summary>Moves users of the old Run-key startup to the Startup-folder shortcut.</summary>
+        internal static void MigrateStartup()
+        {
+            try
+            {
+                bool hadRunKey;
+                using (var k = Registry.CurrentUser.OpenSubKey(RunKey)) hadRunKey = k != null && k.GetValue("ConsoleSwitch") != null;
+                if (hadRunKey || IsStartup()) SetStartup(true); // also refreshes the shortcut's target if the exe moved
+            }
+            catch { }
         }
 
         protected override void ExitThreadCore()

@@ -265,6 +265,14 @@ namespace ConsoleSwitch
                                 continue; // keep watching the picture; skip the ping this tick
                             }
                         }
+                        // Every ~1 s: did someone switch the monitor to the PC with its own buttons?
+                        if (ticks % 5 == 4 && Ddc.Get(cfg.MonitorModel, Ddc.VCP_INPUT) == cfg.PcInput)
+                        {
+                            Log.Write("Monitor was switched to the PC by hand; restoring the PC layout.");
+                            SwitchToPc(); // console stays 'online', so we won't jump back until it turns off and on again
+                            ticks++;
+                            continue;
+                        }
                         if (++ticks % 3 != 0) continue; // ping every ~0.6 s
                     }
 

@@ -70,8 +70,8 @@ namespace ConsoleSwitch
             layoutBox.SelectedIndex = cfg.Layout == LayoutMode.Laptop ? 1 : cfg.Layout == LayoutMode.DontTouch ? 2 : 0;
 
             y += 12;
-            testConsoleBtn = new Button { Text = "Test: show console", Left = 20, Top = y, Width = 160, Height = 32 };
-            testPcBtn = new Button { Text = "Test: show PC", Left = 190, Top = y, Width = 130, Height = 32 };
+            testConsoleBtn = new Button { Text = "Try console input", Left = 20, Top = y, Width = 160, Height = 32 };
+            testPcBtn = new Button { Text = "Try PC input", Left = 190, Top = y, Width = 130, Height = 32 };
             saveBtn = new Button { Text = "Save", Left = 440, Top = y, Width = 100, Height = 32 };
             testConsoleBtn.Click += (s, e) => TestInput(true);
             testPcBtn.Click += (s, e) => TestInput(false);

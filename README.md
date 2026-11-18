@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/icon.png" width="96" alt=""></p>
+﻿<p align="center"><img src="assets/icon.png" width="96" alt=""></p>
 
 <h1 align="center">Console Switch</h1>
 
@@ -8,7 +8,7 @@
 <a href="https://buymeacoffee.com/mehmeteminf"><img src="https://img.shields.io/badge/Support-Buy%20me%20a%20coffee-ffdd00?style=for-the-badge&logo=buymeacoffee&logoColor=black" alt="Buy me a coffee"></a>
 </p>
 
-> **Beta.** I built this for my own laptop, an ASUS monitor and a PS5, and it has run my setup every day. The general version is new: if it misbehaves on your monitor or console, please [open an issue](../../issues) with your monitor model and the log (tray menu → Open log).
+> **Beta.** I built this for my own laptop, an ASUS monitor and a PS5, and it has run my setup every day. The general version is new: if it misbehaves on your monitor or console, please [open an issue](../../issues) with your monitor model and the log (tray menu â†’ Open log).
 
 ## The problem
 
@@ -25,7 +25,11 @@ You share one monitor between a laptop or PC and a console. Every time you want 
 - Works with **PlayStation, Xbox and Nintendo Switch** (and any device with a fixed MAC), and with any monitor that supports **DDC/CI**.
 - No account, no cloud, no telemetry. One small .exe.
 
-<p align="center"><img src="assets/setup.png" width="480" alt="Setup window"></p>
+<p align="center">
+  <img src="assets/panel.png" width="340" alt="Tray panel: PC or console, monitor volume, audio fix">
+  &nbsp;
+  <img src="assets/setup.png" width="420" alt="Setup window">
+</p>
 
 ## Install
 
@@ -34,10 +38,10 @@ You share one monitor between a laptop or PC and a console. Every time you want 
 3. Setup opens:
    - **Monitor:** pick yours. The input showing right now is usually your PC's; pick the one your console is plugged into.
    - **Console:** turn it on, press **Scan network**, pick it.
-   - Press **Test: show console** and **Test: show PC** to check, then **Save**.
-4. Tray menu → **Start with Windows**.
+   - Press **Try console input** and **Try PC input** to check, then **Save**.
+4. Tray menu â†’ **Start with Windows**.
 
-Windows SmartScreen may warn the first time because the .exe isn't code-signed. Choose **More info → Run anyway**, or build it yourself from the source.
+Windows SmartScreen may warn the first time because the .exe isn't code-signed. Choose **More info â†’ Run anyway**, or build it yourself from the source.
 
 ## Requirements
 
@@ -48,7 +52,7 @@ Windows SmartScreen may warn the first time because the .exe isn't code-signed. 
 ## Tips
 
 - **PlayStation rest mode:** if "Stay connected to the internet" is on in rest mode, the console never leaves the network, so Console Switch can't tell it woke up. Switch to the PC is still instant when the picture goes away. Use the tray's "Show console now" when you wake it, or turn that rest-mode option off.
-- **PS5 audio drops after boot:** PS5 → Settings → Sound → Audio Output → Audio Format: **Linear PCM** helps. If it still happens, use **Fix console audio**.
+- **PS5 audio drops after boot:** PS5 â†’ Settings â†’ Sound â†’ Audio Output â†’ Audio Format: **Linear PCM** helps. If it still happens, use **Fix console audio**.
 - **A fixed IP for the console** (a DHCP reservation in your router) makes detection instant.
 - Shortcuts and Stream Deck buttons: `ConsoleSwitch.exe --console`, `--pc`, `--fix-audio`. `--probe` prints what it can see and changes nothing.
 
@@ -75,7 +79,7 @@ The output is `dist\ConsoleSwitch.exe`. `assets\make-icon.ps1` redraws the icon.
 
 ## Support
 
-Console Switch is free and open source. If it saved you from hunting for the input button, you can [buy me a coffee](https://buymeacoffee.com/mehmeteminf) ☕. Bug reports with your monitor model are just as valuable.
+Console Switch is free and open source. If it saved you from hunting for the input button, you can [buy me a coffee](https://buymeacoffee.com/mehmeteminf) â˜•. Bug reports with your monitor model are just as valuable.
 
 ## License
 

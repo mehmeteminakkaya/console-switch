@@ -1,30 +1,27 @@
-// Tray icon, its menu, and the small volume panel that opens on left click.
+// Tray icon, its right-click menu, and the control panel that opens on left click.
 using System;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
 namespace ConsoleSwitch
 {
+    // Colours shared with the setup window.
     static class Theme
     {
-        public static readonly Color Back = Color.FromArgb(32, 32, 36);
-        public static readonly Color Panel = Color.FromArgb(44, 44, 50);
-        public static readonly Color Fore = Color.FromArgb(236, 236, 240);
-        public static readonly Color Muted = Color.FromArgb(160, 160, 172);
-        public static readonly Color Accent = Color.FromArgb(124, 107, 224);
+        public static readonly Color Back = Ui.Back;
+        public static readonly Color Panel = Ui.Card;
+        public static readonly Color Fore = Ui.Fore;
+        public static readonly Color Muted = Ui.Muted;
 
         public static void Apply(Form f)
         {
             f.BackColor = Back;
             f.ForeColor = Fore;
-            f.HandleCreated += (s, e) =>
-            {
-                int on = 1;
-                try { Native.DwmSetWindowAttribute(f.Handle, 20, ref on, 4); Native.DwmSetWindowAttribute(f.Handle, 19, ref on, 4); } catch { }
-            };
+            Ui.Window(f);
         }
 
         public static void ApplyChildren(Control root)
@@ -37,7 +34,9 @@ namespace ConsoleSwitch
                     b.FlatStyle = FlatStyle.Flat;
                     b.BackColor = Panel;
                     b.ForeColor = Fore;
-                    b.FlatAppearance.BorderColor = Color.FromArgb(70, 70, 80);
+                    b.FlatAppearance.BorderColor = Ui.Line;
+                    b.FlatAppearance.MouseOverBackColor = Ui.CardHover;
+                    b.Cursor = Cursors.Hand;
                 }
                 else if (c is ComboBox) { c.BackColor = Panel; c.ForeColor = Fore; ((ComboBox)c).FlatStyle = FlatStyle.Flat; }
                 else if (c is CheckBox || c is Label) { if (c.ForeColor != Muted) c.ForeColor = Fore; }
@@ -46,19 +45,52 @@ namespace ConsoleSwitch
         }
     }
 
-    class DarkColors : ProfessionalColorTable
+    /// <summary>Dark, rounded right-click menu.</summary>
+    class MenuRenderer : ToolStripProfessionalRenderer
     {
-        public override Color ToolStripDropDownBackground { get { return Theme.Back; } }
-        public override Color ImageMarginGradientBegin { get { return Theme.Back; } }
-        public override Color ImageMarginGradientMiddle { get { return Theme.Back; } }
-        public override Color ImageMarginGradientEnd { get { return Theme.Back; } }
-        public override Color MenuItemSelected { get { return Theme.Panel; } }
-        public override Color MenuItemBorder { get { return Theme.Panel; } }
-        public override Color MenuBorder { get { return Color.FromArgb(60, 60, 68); } }
-        public override Color SeparatorDark { get { return Color.FromArgb(60, 60, 68); } }
-        public override Color SeparatorLight { get { return Color.FromArgb(60, 60, 68); } }
-        public override Color CheckBackground { get { return Theme.Panel; } }
-        public override Color CheckSelectedBackground { get { return Theme.Panel; } }
+        public MenuRenderer() : base(new MenuColors()) { RoundedEdges = true; }
+
+        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+        {
+            if (!e.Item.Selected || !e.Item.Enabled) return;
+            Ui.Smooth(e.Graphics);
+            var r = new RectangleF(4, 1, e.Item.Width - 8, e.Item.Height - 2);
+            using (var b = new SolidBrush(Ui.CardHover)) using (var p = Ui.Round(r, 5)) e.Graphics.FillPath(b, p);
+        }
+
+        protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
+        {
+            int y = e.Item.Height / 2;
+            using (var pen = new Pen(Ui.Line)) e.Graphics.DrawLine(pen, 12, y, e.Item.Width - 12, y);
+        }
+
+        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+        {
+            e.TextColor = e.Item.Enabled ? Ui.Fore : Ui.Muted;
+            base.OnRenderItemText(e);
+        }
+
+        protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
+        {
+            Ui.Smooth(e.Graphics);
+            var r = new RectangleF(e.ImageRectangle.X - 2, e.ImageRectangle.Y - 2, e.ImageRectangle.Width + 4, e.ImageRectangle.Height + 4);
+            using (var b = new SolidBrush(Ui.Accent)) using (var p = Ui.Round(r, 4)) e.Graphics.FillPath(b, p);
+            using (var f = Ui.Icons(8f)) Ui.Center(e.Graphics, "", f, Color.White, r);
+        }
+
+        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+        {
+            using (var pen = new Pen(Ui.Line)) e.Graphics.DrawRectangle(pen, 0, 0, e.AffectedBounds.Width - 1, e.AffectedBounds.Height - 1);
+        }
+
+        class MenuColors : ProfessionalColorTable
+        {
+            public override Color ToolStripDropDownBackground { get { return Ui.Back; } }
+            public override Color ImageMarginGradientBegin { get { return Ui.Back; } }
+            public override Color ImageMarginGradientMiddle { get { return Ui.Back; } }
+            public override Color ImageMarginGradientEnd { get { return Ui.Back; } }
+            public override Color MenuBorder { get { return Ui.Line; } }
+        }
     }
 
     public class TrayApp : ApplicationContext
@@ -72,7 +104,7 @@ namespace ConsoleSwitch
         readonly NotifyIcon icon;
         readonly ContextMenuStrip menu;
         readonly ToolStripMenuItem statusItem, autoItem, startupItem;
-        readonly VolumePanel panel;
+        readonly ControlPanel panel;
         readonly Control ui = new Control();
 
         public TrayApp(Config cfg)
@@ -80,33 +112,38 @@ namespace ConsoleSwitch
             this.cfg = cfg;
             ui.CreateControl(); // for marshalling events from the switcher thread
 
-            menu = new ContextMenuStrip { Renderer = new ToolStripProfessionalRenderer(new DarkColors()), ForeColor = Theme.Fore, ShowImageMargin = false };
-            statusItem = new ToolStripMenuItem("Console Switch") { Enabled = false, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };
+            menu = new ContextMenuStrip
+            {
+                Renderer = new MenuRenderer(),
+                Font = new Font("Segoe UI", 9.5f),
+                Padding = new Padding(2, 6, 2, 6),
+                ShowCheckMargin = false,
+                ShowImageMargin = true,
+                ImageScalingSize = new Size(16, 16)
+            };
+            statusItem = Item("Console Switch", null, null);
+            statusItem.Enabled = false;
+            statusItem.Font = new Font("Segoe UI Semibold", 9.5f);
             menu.Items.Add(statusItem);
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(new ToolStripMenuItem("Show console now", null, (s, e) => Background(() => switcher.SwitchToConsole())));
-            menu.Items.Add(new ToolStripMenuItem("Show PC now", null, (s, e) => Background(() => switcher.SwitchToPc())));
-            menu.Items.Add(new ToolStripMenuItem("Fix console audio", null, (s, e) => Background(() => switcher.FixConsoleAudio())));
+            menu.Items.Add(Item("Show console", Ui.GlyphGame, () => Background(() => switcher.SwitchToConsole())));
+            menu.Items.Add(Item("Show PC", Ui.GlyphPc, () => Background(() => switcher.SwitchToPc())));
+            menu.Items.Add(Item("Fix console audio", Ui.GlyphRepair, () => Background(() => switcher.FixConsoleAudio())));
             menu.Items.Add(new ToolStripSeparator());
-            autoItem = new ToolStripMenuItem("Switch automatically", null, (s, e) =>
-            {
-                cfg.AutoSwitch = !cfg.AutoSwitch; cfg.Save(); RefreshMenu();
-            });
+            autoItem = Item("Switch automatically", Ui.GlyphAuto, () => { cfg.AutoSwitch = !cfg.AutoSwitch; cfg.Save(); RefreshAll(); });
             menu.Items.Add(autoItem);
-            startupItem = new ToolStripMenuItem("Start with Windows", null, (s, e) => { SetStartup(!IsStartup()); RefreshMenu(); });
+            startupItem = Item("Start with Windows", "", () => { SetStartup(!IsStartup()); RefreshAll(); });
             menu.Items.Add(startupItem);
-            menu.Items.Add(new ToolStripMenuItem("Settings…", null, (s, e) => OpenSettings()));
-            menu.Items.Add(new ToolStripMenuItem("Open log", null, (s, e) => Open(Log.FilePath)));
+            menu.Items.Add(Item("Settings", Ui.GlyphSettings, OpenSettings));
+            menu.Items.Add(Item("Open log", "", () => Open(Log.FilePath)));
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(new ToolStripMenuItem("☕ Support this project", null, (s, e) => Open(SupportUrl)));
-            menu.Items.Add(new ToolStripMenuItem("Exit", null, (s, e) => ExitThread()));
-            foreach (ToolStripItem it in menu.Items) it.ForeColor = Theme.Fore;
-            statusItem.ForeColor = Theme.Muted;
+            menu.Items.Add(Item("Support this project", Ui.GlyphHeart, () => Open(SupportUrl)));
+            menu.Items.Add(Item("Exit", "", ExitThread));
 
             icon = new NotifyIcon { ContextMenuStrip = menu, Visible = true, Text = "Console Switch" };
             try { icon.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { icon.Icon = SystemIcons.Application; }
 
-            panel = new VolumePanel(cfg, () => Background(() => switcher.FixConsoleAudio()));
+            panel = new ControlPanel(cfg, () => switcher, OpenSettings, () => { cfg.Save(); RefreshAll(); });
             icon.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) panel.Toggle(); };
 
             SystemEvents.DisplaySettingsChanged += (s, e) => Ddc.ClearCache();
@@ -117,13 +154,33 @@ namespace ConsoleSwitch
                 Environment.Exit(0);
             }
             StartSwitcher();
-            RefreshMenu();
+            RefreshAll();
+        }
+
+        static ToolStripMenuItem Item(string text, string glyph, Action click)
+        {
+            var it = new ToolStripMenuItem(text) { Padding = new Padding(4, 3, 4, 3) };
+            if (glyph != null) it.Image = GlyphImage(glyph);
+            if (click != null) it.Click += (s, e) => click();
+            return it;
+        }
+
+        static Bitmap GlyphImage(string glyph)
+        {
+            var bmp = new Bitmap(16, 16);
+            using (var g = Graphics.FromImage(bmp))
+            using (var f = Ui.Icons(10.5f))
+            {
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                Ui.Center(g, glyph, f, Ui.Fore, new RectangleF(0, 0, 16, 16));
+            }
+            return bmp;
         }
 
         void StartSwitcher()
         {
             switcher = new Switcher(cfg);
-            switcher.StateChanged += () => { try { ui.BeginInvoke(new Action(RefreshMenu)); } catch { } };
+            switcher.StateChanged += () => { try { ui.BeginInvoke(new Action(RefreshAll)); } catch { } };
             switcher.Start();
         }
 
@@ -134,6 +191,7 @@ namespace ConsoleSwitch
 
         void OpenSettings()
         {
+            panel.Hide();
             if (switcher != null) switcher.Paused = true;
             bool changed = RunSetup();
             if (changed)
@@ -142,18 +200,25 @@ namespace ConsoleSwitch
                 StartSwitcher();
             }
             else if (switcher != null) switcher.Paused = false;
-            RefreshMenu();
+            RefreshAll();
         }
 
-        void RefreshMenu()
+        public static string StatusText(Config cfg, Switcher sw)
         {
-            string where = switcher == null ? "" : switcher.Mode == Mode.Console ? "showing console" : switcher.Mode == Mode.Pc ? "showing PC" : "starting…";
-            statusItem.Text = (string.IsNullOrEmpty(cfg.ConsoleName) ? "Console" : cfg.ConsoleName) + ": " +
-                (switcher != null && switcher.ConsoleOnline ? "on" : "off") + "  ·  " + where;
+            string name = string.IsNullOrEmpty(cfg.ConsoleName) ? "Console" : cfg.ConsoleName;
+            if (sw == null) return name;
+            string where = sw.Mode == Mode.Console ? "showing console" : sw.Mode == Mode.Pc ? "showing PC" : "starting…";
+            return name + " " + (sw.ConsoleOnline ? "on" : "off") + "  ·  " + where;
+        }
+
+        void RefreshAll()
+        {
+            statusItem.Text = StatusText(cfg, switcher);
             autoItem.Checked = cfg.AutoSwitch;
             startupItem.Checked = IsStartup();
-            string tip = "Console Switch – " + where;
+            string tip = "Console Switch – " + StatusText(cfg, switcher);
             icon.Text = tip.Length > 63 ? tip.Substring(0, 63) : tip;
+            panel.RefreshState();
         }
 
         static void Background(Action a)
@@ -161,7 +226,7 @@ namespace ConsoleSwitch
             new Thread(() => { try { a(); } catch (Exception ex) { Log.Write("Action failed: " + ex.Message); } }) { IsBackground = true }.Start();
         }
 
-        static void Open(string target)
+        internal static void Open(string target)
         {
             try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true }); } catch { }
         }
@@ -171,7 +236,7 @@ namespace ConsoleSwitch
             using (var k = Registry.CurrentUser.OpenSubKey(RunKey)) return k != null && k.GetValue("ConsoleSwitch") != null;
         }
 
-        static void SetStartup(bool on)
+        internal static void SetStartup(bool on)
         {
             using (var k = Registry.CurrentUser.CreateSubKey(RunKey))
             {
@@ -189,52 +254,133 @@ namespace ConsoleSwitch
         }
     }
 
-    /// <summary>Small panel above the tray: monitor speaker volume, mute, and the audio fix.</summary>
-    public class VolumePanel : Form
+    /// <summary>Quick panel above the tray: PC | Console switch, monitor volume, audio fix and auto mode.</summary>
+    public class ControlPanel : Form
     {
         readonly Config cfg;
-        readonly TrackBar slider;
-        readonly Label title, value;
-        readonly Button muteBtn, fixBtn;
-        readonly System.Windows.Forms.Timer debounce = new System.Windows.Forms.Timer { Interval = 150 };
+        readonly Func<Switcher> getSwitcher;
+        readonly Action changed;
+        readonly Label title, status, valueLabel, volumeLabel;
+        readonly Segmented source;
+        readonly Slider slider;
+        readonly IconButton muteBtn, settingsBtn, fixBtn, autoBtn, supportBtn;
+        readonly System.Windows.Forms.Timer debounce = new System.Windows.Forms.Timer { Interval = 120 };
         int beforeMute = -1;
+        bool loading;
         DateTime hiddenAt = DateTime.MinValue;
         volatile int pending = -1;
         volatile bool writing;
 
-        public VolumePanel(Config cfg, Action fixAudio)
+        public ControlPanel(Config cfg, Func<Switcher> getSwitcher, Action openSettings, Action changed)
         {
-            this.cfg = cfg;
+            this.cfg = cfg; this.getSwitcher = getSwitcher; this.changed = changed;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             TopMost = true;
             StartPosition = FormStartPosition.Manual;
-            Size = new Size(300, 132);
-            Font = new Font("Segoe UI", 9.5f);
-            Theme.Apply(this);
+            ClientSize = new Size(340, 252);
+            BackColor = Ui.Back;
+            ForeColor = Ui.Fore;
+            DoubleBuffered = true;
+            Ui.Window(this);
 
-            title = new Label { Text = "Monitor volume", Left = 14, Top = 12, Width = 200, Font = new Font("Segoe UI Semibold", 10f) };
-            value = new Label { Text = "–", Left = 230, Top = 12, Width = 56, TextAlign = ContentAlignment.TopRight, Font = new Font("Segoe UI Semibold", 10f) };
-            slider = new TrackBar { Left = 8, Top = 40, Width = 284, Minimum = 0, Maximum = 100, TickStyle = TickStyle.None, BackColor = Theme.Back };
-            muteBtn = new Button { Text = "Mute", Left = 14, Top = 88, Width = 90, Height = 30 };
-            fixBtn = new Button { Text = "Fix console audio", Left = 116, Top = 88, Width = 170, Height = 30 };
-            Controls.AddRange(new Control[] { title, value, slider, muteBtn, fixBtn });
-            Theme.ApplyChildren(this);
+            title = new Label { Left = 18, Top = 16, Width = 250, Height = 24, Font = new Font("Segoe UI Semibold", 11.5f), ForeColor = Ui.Fore, BackColor = Ui.Back };
+            status = new Label { Left = 18, Top = 40, Width = 260, Height = 20, Font = new Font("Segoe UI", 9f), ForeColor = Ui.Muted, BackColor = Ui.Back };
+            settingsBtn = new IconButton { Glyph = Ui.GlyphSettings, Left = 288, Top = 16 };
+            settingsBtn.Click += (s, e) => openSettings();
 
-            slider.ValueChanged += (s, e) => { value.Text = slider.Value + "%"; debounce.Stop(); debounce.Start(); };
+            source = new Segmented { Left = 16, Top = 72, Width = 308 };
+            source.Picked += Pick;
+
+            volumeLabel = new Label { Text = "Monitor volume", Left = 18, Top = 150, Width = 200, Height = 20, Font = new Font("Segoe UI", 9f), ForeColor = Ui.Muted, BackColor = Ui.Back };
+            muteBtn = new IconButton { Glyph = Ui.GlyphVolume, Left = 12, Top = 172 };
+            slider = new Slider { Left = 50, Top = 176, Width = 228 };
+            valueLabel = new Label { Left = 278, Top = 176, Width = 46, Height = 28, TextAlign = ContentAlignment.MiddleRight, Font = new Font("Segoe UI Semibold", 10.5f), ForeColor = Ui.Fore, BackColor = Ui.Back };
+
+            fixBtn = new IconButton { Pill = true, Glyph = Ui.GlyphRepair, Text = "Fix audio", Left = 16, Top = 212, Width = 100, Height = 30 };
+            autoBtn = new IconButton { Pill = true, Glyph = Ui.GlyphAuto, Text = "Auto", Left = 122, Top = 212, Width = 80, Height = 30 };
+            supportBtn = new IconButton { Pill = true, Glyph = Ui.GlyphHeart, Text = "Support", Left = 208, Top = 212, Width = 116, Height = 30 };
+            Controls.AddRange(new Control[] { title, status, settingsBtn, source, volumeLabel, muteBtn, slider, valueLabel, fixBtn, autoBtn, supportBtn });
+
+            slider.ValueChanged += (s, e) =>
+            {
+                valueLabel.Text = slider.Value + "%";
+                muteBtn.Glyph = slider.Value == 0 ? Ui.GlyphMute : Ui.GlyphVolume; muteBtn.Invalidate();
+                if (!loading) { debounce.Stop(); debounce.Start(); }
+            };
             debounce.Tick += (s, e) => { debounce.Stop(); QueueWrite(slider.Value); };
             muteBtn.Click += (s, e) => ToggleMute();
-            fixBtn.Click += (s, e) => { Hide(); fixAudio(); };
+            fixBtn.Click += (s, e) =>
+            {
+                var sw = getSwitcher(); if (sw == null) return;
+                status.Text = "Fixing console audio…";
+                Run(() => sw.FixConsoleAudio());
+            };
+            autoBtn.Click += (s, e) => { cfg.AutoSwitch = !cfg.AutoSwitch; changed(); };
+            supportBtn.Click += (s, e) => { Hide(); TrayApp.Open(TrayApp.SupportUrl); };
             Deactivate += (s, e) => { hiddenAt = DateTime.UtcNow; Hide(); };
         }
+
+        void Pick(int index)
+        {
+            var sw = getSwitcher(); if (sw == null) return;
+            source.Busy = true;
+            source.Selected = index;
+            status.Text = index == 1 ? "Switching to the console…" : "Switching to the PC…";
+            Run(() => { if (index == 1) sw.SwitchToConsole(); else sw.SwitchToPc(); });
+        }
+
+        void Run(Action a)
+        {
+            new Thread(() =>
+            {
+                try { a(); } catch (Exception ex) { Log.Write("Panel action failed: " + ex.Message); }
+                try { BeginInvoke(new Action(() => { source.Busy = false; RefreshState(); ReadVolume(); })); } catch { }
+            }) { IsBackground = true }.Start();
+        }
+
+        public void RefreshState()
+        {
+            if (InvokeRequired) { BeginInvoke(new Action(RefreshState)); return; }
+            var sw = getSwitcher();
+            title.Text = string.IsNullOrEmpty(cfg.MonitorModel) ? "Console Switch" : cfg.MonitorModel;
+            if (!source.Busy)
+            {
+                status.Text = TrayApp.StatusText(cfg, sw);
+                source.Selected = sw == null ? -1 : sw.Mode == Mode.Console ? 1 : sw.Mode == Mode.Pc ? 0 : -1;
+            }
+            source.Labels = new[] { "PC", string.IsNullOrEmpty(cfg.ConsoleName) || cfg.ConsoleName == "Console" ? "Console" : Short(cfg.ConsoleName) };
+            source.Invalidate();
+            autoBtn.Active = cfg.AutoSwitch; autoBtn.Invalidate();
+            Invalidate();
+        }
+
+        /// <summary>For screenshots: shows the panel in the middle of the screen with sample state.</summary>
+        public void ShowPreview()
+        {
+            title.Text = "VG249Q3A";
+            status.Text = "PlayStation on  ·  showing console";
+            source.Labels = new[] { "PC", "PlayStation" };
+            source.Selected = 1;
+            loading = true; slider.Value = 40; loading = false;
+            valueLabel.Text = "40%";
+            autoBtn.Active = true;
+            previewDot = true;
+            var area = Screen.PrimaryScreen.WorkingArea;
+            Location = new Point(area.Left + (area.Width - Width) / 2, area.Top + (area.Height - Height) / 2);
+        }
+        bool previewDot;
+
+        static string Short(string name) { return name.StartsWith("Xbox") ? "Xbox" : name; }
 
         public void Toggle()
         {
             if (Visible) { Hide(); return; }
             if ((DateTime.UtcNow - hiddenAt).TotalMilliseconds < 250) return; // the click that just closed it
             var area = Screen.FromPoint(Cursor.Position).WorkingArea;
-            Location = new Point(Math.Min(Cursor.Position.X - Width / 2, area.Right - Width - 8), area.Bottom - Height - 8);
-            if (Location.X < area.Left) Location = new Point(area.Left + 8, Location.Y);
+            int x = Math.Max(area.Left + 12, Math.Min(Cursor.Position.X - Width / 2, area.Right - Width - 12));
+            Location = new Point(x, area.Bottom - Height - 12);
+            RefreshState();
             Show();
             Activate();
             ReadVolume();
@@ -242,7 +388,7 @@ namespace ConsoleSwitch
 
         void ReadVolume()
         {
-            value.Text = "…";
+            valueLabel.Text = "…";
             new Thread(() =>
             {
                 int v = Ddc.Get(cfg.MonitorModel, Ddc.VCP_VOLUME);
@@ -252,9 +398,13 @@ namespace ConsoleSwitch
                     {
                         bool ok = v >= 0 && v <= 100;
                         slider.Enabled = ok; muteBtn.Enabled = ok;
-                        if (ok) { slider.Value = v; value.Text = v + "%"; }
-                        else value.Text = "n/a";
-                        muteBtn.Text = ok && v == 0 && beforeMute > 0 ? "Unmute" : "Mute";
+                        loading = true;
+                        if (ok) slider.Value = v;
+                        loading = false;
+                        valueLabel.Text = ok ? v + "%" : "n/a";
+                        volumeLabel.Text = ok ? "Monitor volume" : "Volume not available on this monitor right now";
+                        muteBtn.Glyph = ok && v == 0 ? Ui.GlyphMute : Ui.GlyphVolume;
+                        muteBtn.Invalidate();
                     }));
                 }
                 catch { }
@@ -263,8 +413,8 @@ namespace ConsoleSwitch
 
         void ToggleMute()
         {
-            if (slider.Value == 0 && beforeMute > 0) { slider.Value = beforeMute; beforeMute = -1; muteBtn.Text = "Mute"; }
-            else { beforeMute = slider.Value; slider.Value = 0; muteBtn.Text = "Unmute"; }
+            if (slider.Value == 0) { slider.Value = beforeMute > 0 ? beforeMute : 20; beforeMute = -1; }
+            else { beforeMute = slider.Value; slider.Value = 0; }
         }
 
         // Only the latest slider position is sent; one write at a time keeps DDC from choking.
@@ -290,13 +440,18 @@ namespace ConsoleSwitch
 
         protected override CreateParams CreateParams
         {
-            get { var cp = base.CreateParams; cp.ExStyle |= 0x80; return cp; } // WS_EX_TOOLWINDOW: not in Alt+Tab
+            get { var cp = base.CreateParams; cp.ExStyle |= 0x80; cp.ClassStyle |= 0x20000; return cp; } // tool window, drop shadow
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            using (var p = new Pen(Color.FromArgb(70, 70, 80))) e.Graphics.DrawRectangle(p, 0, 0, Width - 1, Height - 1);
+            Ui.Smooth(e.Graphics);
+            // status dot next to the subtitle
+            var sw = getSwitcher();
+            Color dot = previewDot || sw != null && sw.ConsoleOnline ? Ui.Green : Ui.Muted;
+            using (var b = new SolidBrush(dot)) e.Graphics.FillEllipse(b, 8, 46, 6, 6);
+            using (var pen = new Pen(Ui.Line)) e.Graphics.DrawLine(pen, 16, 140, Width - 16, 140);
         }
     }
 }

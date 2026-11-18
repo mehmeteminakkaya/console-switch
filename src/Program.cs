@@ -38,6 +38,27 @@ namespace ConsoleSwitch
         {
             var cfg = Config.Load();
             if (cmd == "--probe") { AttachConsole(-1); Probe(); return 0; }
+            if (cmd == "--preview")
+            {
+                Application.EnableVisualStyles();
+                var p = new ControlPanel(cfg, () => null, () => { }, () => { });
+                p.ShowPreview();
+                // Tool windows have no MainWindowHandle, so tell screenshot scripts where the panel is.
+                p.Shown += (s, e) =>
+                {
+                    p.Refresh();
+                    // Render the panel straight to a PNG (no screen capture), then report the path.
+                    string png = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "consoleswitch-panel.png");
+                    using (var bmp = new System.Drawing.Bitmap(p.Width, p.Height))
+                    {
+                        p.DrawToBitmap(bmp, new System.Drawing.Rectangle(0, 0, p.Width, p.Height));
+                        bmp.Save(png, System.Drawing.Imaging.ImageFormat.Png);
+                    }
+                    System.IO.File.WriteAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "consoleswitch-preview.txt"), png);
+                };
+                Application.Run(p);
+                return 0;
+            }
             if (!cfg.IsComplete) { MessageBox.Show("Run Console Switch once to set it up.", "Console Switch"); return 1; }
             var sw = new Switcher(cfg);
             if (cmd == "--console") sw.SwitchToConsole();

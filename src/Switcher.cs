@@ -60,7 +60,7 @@ namespace ConsoleSwitch
             {
                 Log.Write("Switching to the console (" + Ddc.InputName(cfg.ConsoleInput) + ").");
                 // Input first so the console picture shows right away, then the Windows layout.
-                Ddc.Set(cfg.MonitorModel, Ddc.VCP_INPUT, cfg.ConsoleInput);
+                SetInputIfNeeded(cfg.ConsoleInput);
                 if (UseLayout)
                 {
                     int err = Displays.Clone();
@@ -89,7 +89,7 @@ namespace ConsoleSwitch
             lock (switchLock)
             {
                 Log.Write("Switching to the PC (" + Ddc.InputName(cfg.PcInput) + ").");
-                Ddc.Set(cfg.MonitorModel, Ddc.VCP_INPUT, cfg.PcInput);
+                SetInputIfNeeded(cfg.PcInput);
                 if (UseLayout)
                 {
                     Displays.ExtendWithExternalPrimary();
@@ -133,6 +133,13 @@ namespace ConsoleSwitch
                 signalPauseUntil = DateTime.Now.AddMilliseconds(PauseAfterAudioFixMs);
                 Log.Write("Audio fix done.");
             }
+        }
+
+        // Re-selecting the input the monitor is already on makes it re-sync, which can cut the console's sound.
+        void SetInputIfNeeded(int input)
+        {
+            if (Ddc.Get(cfg.MonitorModel, Ddc.VCP_INPUT) == input) return;
+            Ddc.Set(cfg.MonitorModel, Ddc.VCP_INPUT, input);
         }
 
         void WaitForStableSignal()
@@ -212,7 +219,15 @@ namespace ConsoleSwitch
 
             bool online = ConsoleAtKnownIp(true) || FindConsole();
             ConsoleOnline = online;
-            if (cfg.AutoSwitch) { if (online) SwitchToConsole(); else SwitchToPc(); }
+            int input = Ddc.Get(cfg.MonitorModel, Ddc.VCP_INPUT);
+            if (online && input == cfg.ConsoleInput && Ddc.Signal(cfg.MonitorModel) == 1)
+            {
+                // Restarted while playing (e.g. the app was updated): leave the console picture and sound alone.
+                Mode = Mode.Console;
+                Log.Write("Console already on screen; not touching anything.");
+            }
+            else if (cfg.AutoSwitch) { if (online) SwitchToConsole(); else SwitchToPc(); }
+            else Mode = input == cfg.ConsoleInput ? Mode.Console : Mode.Pc;
             Changed();
 
             int failures = 0, ticks = 0;

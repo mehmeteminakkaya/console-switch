@@ -319,6 +319,11 @@ namespace ConsoleSwitch
             autoBtn.Click += (s, e) => { cfg.AutoSwitch = !cfg.AutoSwitch; changed(); };
             supportBtn.Click += (s, e) => { Hide(); TrayApp.Open(TrayApp.SupportUrl); };
             Deactivate += (s, e) => { hiddenAt = DateTime.UtcNow; Hide(); };
+            // Switching changes which display is primary and where it sits; keep the panel in the tray corner.
+            SystemEvents.DisplaySettingsChanged += (s, e) =>
+            {
+                try { if (IsHandleCreated) BeginInvoke(new Action(() => { if (Visible) PlaceNearTray(); })); } catch { }
+            };
         }
 
         void Pick(int index)
@@ -377,13 +382,18 @@ namespace ConsoleSwitch
         {
             if (Visible) { Hide(); return; }
             if ((DateTime.UtcNow - hiddenAt).TotalMilliseconds < 250) return; // the click that just closed it
-            var area = Screen.FromPoint(Cursor.Position).WorkingArea;
-            int x = Math.Max(area.Left + 12, Math.Min(Cursor.Position.X - Width / 2, area.Right - Width - 12));
-            Location = new Point(x, area.Bottom - Height - 12);
+            PlaceNearTray();
             RefreshState();
             Show();
             Activate();
             ReadVolume();
+        }
+
+        // Bottom-right corner above the tray, like Windows' own flyouts. The tray lives on the primary display.
+        void PlaceNearTray()
+        {
+            var area = Screen.PrimaryScreen.WorkingArea;
+            Location = new Point(area.Right - Width - 12, area.Bottom - Height - 12);
         }
 
         void ReadVolume()

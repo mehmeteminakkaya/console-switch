@@ -54,49 +54,62 @@ namespace ConsoleSwitch
 
         // ---------- manual actions (also used by the loop) ----------
 
+        volatile bool switching; // a switch is in progress: the loop must not react to its own input changes
+
         public void SwitchToConsole()
         {
             lock (switchLock)
             {
-                Log.Write("Switching to the console (" + Ddc.InputName(cfg.ConsoleInput) + ").");
-                // Input first so the console picture shows right away, then the Windows layout.
-                SetInputIfNeeded(cfg.ConsoleInput);
-                if (UseLayout)
-                {
-                    int err = Displays.Clone();
-                    if (err != 0)
-                    {
-                        Log.Write("Mirroring failed (code " + err + "); using the laptop screen only.");
-                        Thread.Sleep(150);
-                        Displays.LaptopOnly();
-                    }
-                    else
-                    {
-                        // Re-attaching the monitor makes it fall back to the PC input; catch that fast.
-                        Ddc.ClearCache();
-                        HoldInput(cfg.ConsoleInput, cfg.PcInput);
-                    }
-                }
-                else SetInputVerified(cfg.ConsoleInput, false);
-                Mode = Mode.Console;
+                switching = true;
+                try { DoSwitchToConsole(); } finally { switching = false; }
             }
             Changed();
+        }
+
+        void DoSwitchToConsole()
+        {
+            Log.Write("Switching to the console (" + Ddc.InputName(cfg.ConsoleInput) + ").");
+            // Input first so the console picture shows right away, then the Windows layout.
+            SetInputIfNeeded(cfg.ConsoleInput);
+            if (UseLayout)
+            {
+                int err = Displays.Clone();
+                if (err != 0)
+                {
+                    Log.Write("Mirroring failed (code " + err + "); using the laptop screen only.");
+                    Thread.Sleep(150);
+                    Displays.LaptopOnly();
+                }
+                else
+                {
+                    // Re-attaching the monitor makes it fall back to the PC input; catch that fast.
+                    Ddc.ClearCache();
+                    HoldInput(cfg.ConsoleInput, cfg.PcInput);
+                }
+            }
+            else SetInputVerified(cfg.ConsoleInput, false);
+            Mode = Mode.Console;
         }
 
         public void SwitchToPc()
         {
             lock (switchLock)
             {
-                Log.Write("Switching to the PC (" + Ddc.InputName(cfg.PcInput) + ").");
-                SetInputIfNeeded(cfg.PcInput);
-                if (UseLayout)
+                switching = true;
+                try
                 {
-                    Displays.ExtendWithExternalPrimary();
-                    Ddc.ClearCache();
-                    HoldInput(cfg.PcInput, cfg.ConsoleInput);
+                    Log.Write("Switching to the PC (" + Ddc.InputName(cfg.PcInput) + ").");
+                    SetInputIfNeeded(cfg.PcInput);
+                    if (UseLayout)
+                    {
+                        Displays.ExtendWithExternalPrimary();
+                        Ddc.ClearCache();
+                        HoldInput(cfg.PcInput, cfg.ConsoleInput);
+                    }
+                    else SetInputVerified(cfg.PcInput, false);
+                    Mode = Mode.Pc;
                 }
-                else SetInputVerified(cfg.PcInput, false);
-                Mode = Mode.Pc;
+                finally { switching = false; }
             }
             Changed();
         }
@@ -262,6 +275,13 @@ namespace ConsoleSwitch
                 Mode = Mode.Console;
                 Log.Write("Console already on screen; not touching anything.");
             }
+            else if (online && input == cfg.PcInput)
+            {
+                // Started (or restarted) while someone is using the PC and the console happens to be on:
+                // don't yank them over. Auto switching resumes the next time the console turns on.
+                Mode = Mode.Pc;
+                Log.Write("Console is on but the PC is on screen; staying on the PC.");
+            }
             else if (cfg.AutoSwitch) { if (online) SwitchToConsole(); else SwitchToPc(); }
             else Mode = input == cfg.ConsoleInput ? Mode.Console : Mode.Pc;
             Changed();
@@ -277,7 +297,7 @@ namespace ConsoleSwitch
                 try
                 {
                     Thread.Sleep(online ? ConsoleTickMs : IdleTickMs);
-                    if (paused || !cfg.AutoSwitch) { noSignal.Reset(); continue; }
+                    if (paused || !cfg.AutoSwitch || switching) { noSignal.Reset(); continue; }
 
                     // Console mode: the picture disappears seconds before the console leaves the network.
                     if (online && Mode == Mode.Console)

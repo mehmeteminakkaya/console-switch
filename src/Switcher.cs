@@ -72,10 +72,9 @@ namespace ConsoleSwitch
                     }
                     else
                     {
-                        // Re-attaching the monitor resets its DDC for a moment; check the input stuck.
+                        // Re-attaching the monitor makes it fall back to the PC input; catch that fast.
                         Ddc.ClearCache();
-                        WaitMonitorReady();
-                        SetInputVerified(cfg.ConsoleInput, false);
+                        HoldInput(cfg.ConsoleInput, cfg.PcInput);
                     }
                 }
                 else SetInputVerified(cfg.ConsoleInput, false);
@@ -94,8 +93,9 @@ namespace ConsoleSwitch
                 {
                     Displays.ExtendWithExternalPrimary();
                     Ddc.ClearCache();
+                    HoldInput(cfg.PcInput, cfg.ConsoleInput);
                 }
-                SetInputVerified(cfg.PcInput, false);
+                else SetInputVerified(cfg.PcInput, false);
                 Mode = Mode.Pc;
             }
             Changed();
@@ -133,6 +133,42 @@ namespace ConsoleSwitch
                 signalPauseUntil = DateTime.Now.AddMilliseconds(PauseAfterAudioFixMs);
                 Log.Write("Audio fix done.");
             }
+        }
+
+        // After a Windows layout change the monitor re-syncs and may jump to the other input on its own.
+        // Poll quickly and push it back the moment it reports the wrong input, until it settles.
+        void HoldInput(int target, int other)
+        {
+            var sw = Stopwatch.StartNew();
+            var sinceSend = Stopwatch.StartNew();
+            var steady = new Stopwatch();   // how long the monitor has reported the target without a break
+            int sends = 0;
+            while (sw.ElapsedMilliseconds < 8000)
+            {
+                int now = Ddc.Get(cfg.MonitorModel, Ddc.VCP_INPUT);
+                if (now == target)
+                {
+                    if (!steady.IsRunning) steady.Restart();
+                    // The fallback to the other input can come ~1 s after the layout change, so wait it out.
+                    if (steady.ElapsedMilliseconds >= 1800)
+                    {
+                        if (sends > 0) Log.Write("Monitor fell back to " + Ddc.InputName(other) + "; pushed " + Ddc.InputName(target) + " again (" + sends + "x) after " + sw.ElapsedMilliseconds + " ms.");
+                        return;
+                    }
+                }
+                else
+                {
+                    if (now == other) steady.Reset();
+                    if (now == other && sends < 4 && sinceSend.ElapsedMilliseconds > 500)
+                    {
+                        Ddc.Set(cfg.MonitorModel, Ddc.VCP_INPUT, target);
+                        sends++;
+                        sinceSend.Restart();
+                    }
+                }
+                Thread.Sleep(120);
+            }
+            Log.Write("Input didn't settle on " + Ddc.InputName(target) + " within 8 s.");
         }
 
         // Re-selecting the input the monitor is already on makes it re-sync, which can cut the console's sound.

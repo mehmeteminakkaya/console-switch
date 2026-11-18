@@ -164,47 +164,57 @@ namespace ConsoleSwitch
 
         delegate T HandleFn<T>(IntPtr h);
 
-        // Runs fn on the monitor whose model matches; if only one DDC monitor exists it is used regardless.
+        // Opens every physical monitor at once; handles stay valid until act() returns.
+        static void WithAllPhysical(Action<List<KeyValuePair<string, IntPtr>>> act)
+        {
+            var hmons = new List<IntPtr>();
+            Native.EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (h, a, b, c) => { hmons.Add(h); return true; }, IntPtr.Zero);
+            var opened = new List<KeyValuePair<uint, Native.PHYSICAL_MONITOR[]>>();
+            var all = new List<KeyValuePair<string, IntPtr>>();
+            try
+            {
+                foreach (IntPtr hm in hmons)
+                {
+                    var mi = new Native.MONITORINFOEX();
+                    mi.cbSize = Marshal.SizeOf(typeof(Native.MONITORINFOEX));
+                    Native.GetMonitorInfo(hm, ref mi);
+                    uint n;
+                    if (!Native.GetNumberOfPhysicalMonitorsFromHMONITOR(hm, out n) || n == 0) continue;
+                    var pms = new Native.PHYSICAL_MONITOR[n];
+                    if (!Native.GetPhysicalMonitorsFromHMONITOR(hm, n, pms)) continue;
+                    opened.Add(new KeyValuePair<uint, Native.PHYSICAL_MONITOR[]>(n, pms));
+                    for (int i = 0; i < pms.Length; i++) all.Add(new KeyValuePair<string, IntPtr>(mi.szDevice + "#" + i, pms[i].hPhysicalMonitor));
+                }
+                act(all);
+            }
+            finally { foreach (var o in opened) Native.DestroyPhysicalMonitors(o.Key, o.Value); }
+        }
+
+        // Runs fn on the configured monitor. Usually only one connected monitor speaks DDC/CI, and then it is used
+        // directly: reading the model (capabilities) takes ~1 s and fails while the monitor is busy re-syncing after
+        // a layout change, which is exactly when speed matters. The model is only compared when several answer.
         static bool WithMonitor<T>(string model, HandleFn<T> fn, out T result)
         {
             T res = default(T);
             bool done = false;
             lock (ioLock)
             {
-                var candidates = new List<KeyValuePair<string, IntPtr>>();
-                IntPtr match = IntPtr.Zero;
-                ForEachPhysical((h, gdi, idx) =>
+                WithAllPhysical(all =>
                 {
-                    uint t, c, m;
-                    if (!Native.GetVCPFeatureAndVCPFeatureReply(h, VCP_INPUT, out t, out c, out m)) return false;
-                    string key = gdi + "#" + idx;
-                    string caps;
-                    bool isMatch = !string.IsNullOrEmpty(model) && capsCache.TryGetValue(key, out caps) &&
-                                   string.Equals(ParseModel(caps), model, StringComparison.OrdinalIgnoreCase);
-                    if (isMatch || candidates.Count == 0 && string.IsNullOrEmpty(model))
+                    var responders = new List<KeyValuePair<string, IntPtr>>();
+                    foreach (var p in all)
                     {
-                        res = fn(h); done = true; return true;
-                    }
-                    candidates.Add(new KeyValuePair<string, IntPtr>(key, h));
-                    return false;
-                });
-                if (!done)
-                {
-                    // Model not cached yet (or cache cleared after a display change): read caps, then retry once.
-                    ForEachPhysical((h, gdi, idx) =>
-                    {
-                        string key = gdi + "#" + idx;
                         uint t, c, m;
-                        if (!Native.GetVCPFeatureAndVCPFeatureReply(h, VCP_INPUT, out t, out c, out m)) return false;
-                        string caps = ReadCaps(h, key);
-                        if (string.IsNullOrEmpty(model) || string.Equals(ParseModel(caps), model, StringComparison.OrdinalIgnoreCase)
-                            || ParseModel(caps).Length == 0)
-                        {
-                            res = fn(h); done = true; return true;
-                        }
-                        return false;
-                    });
-                }
+                        if (Native.GetVCPFeatureAndVCPFeatureReply(p.Value, VCP_INPUT, out t, out c, out m)) responders.Add(p);
+                    }
+                    if (responders.Count == 0) return;
+                    IntPtr target = responders[0].Value;
+                    if (responders.Count > 1 && !string.IsNullOrEmpty(model))
+                        foreach (var p in responders)
+                            if (string.Equals(ParseModel(ReadCaps(p.Value, p.Key)), model, StringComparison.OrdinalIgnoreCase)) { target = p.Value; break; }
+                    res = fn(target);
+                    done = true;
+                });
             }
             result = res;
             return done;

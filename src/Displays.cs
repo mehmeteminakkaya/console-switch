@@ -71,6 +71,17 @@ namespace ConsoleSwitch
             return false;
         }
 
+        /// <summary>True when two or more displays are active with separate desktops (extend), i.e. not mirrored.</summary>
+        public static bool IsExtended()
+        {
+            Native.DISPLAYCONFIG_PATH_INFO[] paths; Native.DISPLAYCONFIG_MODE_INFO[] modes;
+            if (!Query(Native.QDC_ONLY_ACTIVE_PATHS, out paths, out modes) || paths.Length < 2) return false;
+            var sources = new HashSet<string>();
+            foreach (var p in paths)
+                sources.Add(p.sourceInfo.adapterId.LowPart + ":" + p.sourceInfo.adapterId.HighPart + ":" + p.sourceInfo.id);
+            return sources.Count >= 2;
+        }
+
         static int Apply(uint topology)
         {
             return Native.SetDisplayConfigTopology(0, IntPtr.Zero, 0, IntPtr.Zero, Native.SDC_APPLY | topology);

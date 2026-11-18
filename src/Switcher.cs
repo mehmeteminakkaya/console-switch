@@ -71,6 +71,12 @@ namespace ConsoleSwitch
             Log.Write("Switching to the console (" + Ddc.InputName(cfg.ConsoleInput) + ").");
             // Input first so the console picture shows right away, then the Windows layout.
             SetInputIfNeeded(cfg.ConsoleInput);
+            ApplyConsoleLayout();
+            Mode = Mode.Console;
+        }
+
+        void ApplyConsoleLayout()
+        {
             if (UseLayout)
             {
                 int err = Displays.Clone();
@@ -88,7 +94,29 @@ namespace ConsoleSwitch
                 }
             }
             else SetInputVerified(cfg.ConsoleInput, false);
-            Mode = Mode.Console;
+        }
+
+        /// <summary>The console is already on screen (switched with the monitor's buttons, or the app restarted while
+        /// playing): adopt console mode and fix the Windows layout if it's still the PC one. Never touches the input
+        /// unless the layout has to change.</summary>
+        void AdoptConsole(string why)
+        {
+            lock (switchLock)
+            {
+                switching = true;
+                try
+                {
+                    Mode = Mode.Console;
+                    if (UseLayout && Displays.IsExtended())
+                    {
+                        Log.Write(why + " Applying the console layout.");
+                        ApplyConsoleLayout();
+                    }
+                    else Log.Write(why + " Not touching anything.");
+                }
+                finally { switching = false; }
+            }
+            Changed();
         }
 
         public void SwitchToPc()
@@ -119,6 +147,14 @@ namespace ConsoleSwitch
         public void FixConsoleAudio()
         {
             lock (switchLock)
+            {
+                switching = true; // the flip to the PC input below is ours, not a hand switch
+                try { DoFixConsoleAudio(); } finally { switching = false; }
+            }
+        }
+
+        void DoFixConsoleAudio()
+        {
             {
                 Log.Write("Audio fix: re-selecting the console input.");
                 signalPauseUntil = DateTime.Now.AddMilliseconds(PauseAfterAudioFixMs);
@@ -271,9 +307,9 @@ namespace ConsoleSwitch
             int input = Ddc.Get(cfg.MonitorModel, Ddc.VCP_INPUT);
             if (online && input == cfg.ConsoleInput && Ddc.Signal(cfg.MonitorModel) == 1)
             {
-                // Restarted while playing (e.g. the app was updated): leave the console picture and sound alone.
-                Mode = Mode.Console;
-                Log.Write("Console already on screen; not touching anything.");
+                // Restarted while playing (e.g. the app was updated): leave the console picture and sound alone,
+                // but fix the layout if it's still the PC one.
+                AdoptConsole("Console already on screen.");
             }
             else if (online && input == cfg.PcInput && Native.GetTickCount64() > 10UL * 60 * 1000)
             {
@@ -331,6 +367,14 @@ namespace ConsoleSwitch
                             continue;
                         }
                         if (++ticks % 3 != 0) continue; // ping every ~0.6 s
+                    }
+                    // PC mode with the console on: every ~1 s, did someone switch the monitor to the console by hand?
+                    else if (online && Mode == Mode.Pc && ++ticks % 5 == 0
+                             && Ddc.Get(cfg.MonitorModel, Ddc.VCP_INPUT) == cfg.ConsoleInput && Ddc.Signal(cfg.MonitorModel) == 1)
+                    {
+                        signalSeen = true; noSignal.Reset();
+                        AdoptConsole("Monitor was switched to the console by hand.");
+                        continue;
                     }
 
                     bool seen = ConsoleAtKnownIp(!online);
